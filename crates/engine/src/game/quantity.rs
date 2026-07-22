@@ -296,6 +296,14 @@ pub(crate) fn quantity_expr_uses_recipient(expr: &QuantityExpr) -> bool {
             | QuantityRef::ManaSymbolsInManaCost {
                 scope: ObjectScope::Recipient,
                 ..
+            }
+            // CR 613.4c + CR 122.1 (issue #5929): "for each [kind] counter on
+            // them" — each affected object of a plural anthem reads its own
+            // counters, so layer evaluation must bind the recipient before
+            // resolving (Toxrill, the Corrosive).
+            | QuantityRef::CountersOn {
+                scope: ObjectScope::Recipient,
+                ..
             } => true,
             QuantityRef::Power {
                 scope: ObjectScope::CostPaidObject,

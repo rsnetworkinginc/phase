@@ -3789,6 +3789,10 @@ fn parse_for_each_clause_ref_with_they_controller(
         // Placed before `parse_for_each_controlled_type` so the bare "counter" token
         // does not commit to a type-phrase fallback.
         parse_for_each_counters_on_source,
+        // CR 613.4c + CR 122.1: "counter(s) on them" — per-recipient counter
+        // read for a plural anthem subject (Toxrill, issue #5929). Same
+        // placement rationale as the on-source arm above.
+        parse_for_each_counters_on_them,
         // CR 305.6: "for each basic land type among lands you/they control" —
         // domain scaling (Jodah's Codex, Wandering Treefolk, Radha's Firebrand,
         // Scion of Draco). Reuses the shared bare-domain-suffix combinator and
@@ -3839,6 +3843,31 @@ fn parse_for_each_counters_on_source(input: &str) -> OracleResult<'_, QuantityRe
         rest,
         QuantityRef::CountersOn {
             scope: ObjectScope::Source,
+            counter_type,
+        },
+    ))
+}
+
+/// CR 613.4c + CR 122.1: "[counter type] counter(s) on them" — a plural anaphor
+/// for the objects the surrounding continuous effect applies to (an anthem's
+/// affected set: "Creatures you don't control get -1/-1 for each slime counter
+/// on them", Toxrill, the Corrosive — issue #5929). Each affected object reads
+/// ITS OWN counters, so the scope is `Recipient` (bound per-object during layer
+/// evaluation; outside layers it degrades to first-object-target → source per
+/// `ObjectScope::Recipient`'s documented contract). Distinct from
+/// `parse_for_each_counters_on_source`, whose "on ~/it" self-reference names
+/// the static's own source object.
+pub(crate) fn parse_for_each_counters_on_them(input: &str) -> OracleResult<'_, QuantityRef> {
+    let (rest, counter_type) = alt((
+        parse_typed_counter_type_for_each_source,
+        value(None, parse_generic_counter_match),
+    ))
+    .parse(input)?;
+    let (rest, _) = tag(" on them").parse(rest)?;
+    Ok((
+        rest,
+        QuantityRef::CountersOn {
+            scope: ObjectScope::Recipient,
             counter_type,
         },
     ))

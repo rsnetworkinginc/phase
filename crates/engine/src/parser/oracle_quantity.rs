@@ -3182,6 +3182,17 @@ fn parse_for_each_clause_with_they_controller(
         }
     }
 
+    // CR 613.4c + CR 122.1 (issue #5929): "[counter type] counter(s) on them" —
+    // the plural recipient anaphor ("Creatures you don't control get -1/-1 for
+    // each slime counter on them", Toxrill) must be tried BEFORE the wildcard
+    // "counter on" fallback below, which would mis-scope it to Source (the
+    // static's own source bears no slime counters, so the -1/-1 silently never
+    // applied). Recognition lives in the nom grammar; this is an ordering
+    // bridge only, mirroring the delegation at the end of this function.
+    if let Ok(("", qty)) = nom_quantity::parse_for_each_counters_on_them.parse(clause) {
+        return Some(qty);
+    }
+
     // "[counter type] counter on ~" / "[counter type] counter on it"
     if clause.contains("counter on") {
         let raw_type = clause.split("counter").next().unwrap_or("").trim();

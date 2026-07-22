@@ -32118,3 +32118,116 @@ fn parse_other_untapped_creatures_you_control_declines_new_fallback() {
          whichever OTHER dispatch handler already resolves it correctly"
     );
 }
+
+/// CR 613.4c + CR 122.1 (issue #5929): Toxrill, the Corrosive — "Creatures you
+/// don't control get -1/-1 for each slime counter on them." The "on them"
+/// plural anaphor names each AFFECTED creature, so the counter read must scope
+/// to `Recipient` (per-object binding in layer evaluation). The pre-fix
+/// wildcard "counter on" fallback mis-scoped it to `Source`, reading the
+/// static's own source (zero slime counters) — the -1/-1 silently never
+/// applied.
+#[test]
+fn dynamic_for_each_counter_on_them_scopes_recipient_toxrill() {
+    let def =
+        parse_static_line("Creatures you don't control get -1/-1 for each slime counter on them.")
+            .expect("Toxrill's anthem line must parse as a static");
+    let expected = QuantityExpr::Multiply {
+        factor: -1,
+        inner: Box::new(QuantityExpr::Ref {
+            qty: QuantityRef::CountersOn {
+                scope: ObjectScope::Recipient,
+                counter_type: Some(CounterType::Generic("slime".to_string())),
+            },
+        }),
+    };
+    let power = def
+        .modifications
+        .iter()
+        .find_map(|m| match m {
+            ContinuousModification::AddDynamicPower { value } => Some(value),
+            _ => None,
+        })
+        .expect("dynamic power debuff must be present");
+    assert_eq!(
+        *power, expected,
+        "power must scale by the RECIPIENT's slime counters, not the source's"
+    );
+    let toughness = def
+        .modifications
+        .iter()
+        .find_map(|m| match m {
+            ContinuousModification::AddDynamicToughness { value } => Some(value),
+            _ => None,
+        })
+        .expect("dynamic toughness debuff must be present");
+    assert_eq!(*toughness, expected, "toughness must scale identically");
+}
+
+/// Per-quantity anaphoric provenance in ONE static line: a dynamic term
+/// reading counters "on them" (the recipients) must coexist with a sibling
+/// term reading counters "on ~" (the source) without either scope leaking
+/// into the other. Guards against any description-wide rebind pass — each
+/// for-each clause resolves its own `ObjectScope` at parse time.
+#[test]
+fn dynamic_for_each_counters_mixed_recipient_and_source_terms_keep_scopes() {
+    let def = parse_static_line(
+        "Creatures you don't control get -1/-1 for each slime counter on them and -1/-1 for each storage counter on ~.",
+    )
+    .expect("mixed recipient/source dynamic pump line must parse");
+    let scopes: Vec<ObjectScope> = def
+        .modifications
+        .iter()
+        .filter_map(|m| match m {
+            ContinuousModification::AddDynamicPower { value }
+            | ContinuousModification::AddDynamicToughness { value } => match value {
+                QuantityExpr::Multiply { inner, .. } => match inner.as_ref() {
+                    QuantityExpr::Ref {
+                        qty: QuantityRef::CountersOn { scope, .. },
+                    } => Some(*scope),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        scopes,
+        vec![
+            ObjectScope::Recipient,
+            ObjectScope::Recipient,
+            ObjectScope::Source,
+            ObjectScope::Source,
+        ],
+        "the 'on them' term must stay Recipient and the 'on ~' term must stay Source: {scopes:?}"
+    );
+}
+
+/// Source-read guard (Joraga Warcaller / Door of Destinies class): "for each
+/// charge counter on ~" names the SOURCE outright and must keep
+/// `ObjectScope::Source` — the recipient rebind applies only to the plural
+/// "on them" anaphor.
+#[test]
+fn dynamic_for_each_counter_on_source_class_stays_source_scoped() {
+    let def =
+        parse_static_line("Each creature you control gets +1/+1 for each charge counter on ~.")
+            .expect("source-read dynamic pump line must parse");
+    let power = def
+        .modifications
+        .iter()
+        .find_map(|m| match m {
+            ContinuousModification::AddDynamicPower { value } => Some(value),
+            _ => None,
+        })
+        .expect("dynamic power pump must be present");
+    assert_eq!(
+        *power,
+        QuantityExpr::Ref {
+            qty: QuantityRef::CountersOn {
+                scope: ObjectScope::Source,
+                counter_type: Some(CounterType::Generic("charge".to_string())),
+            },
+        },
+        "'counter on ~' must remain source-scoped"
+    );
+}
